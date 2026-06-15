@@ -62,19 +62,27 @@ Under the hood, for every field both interfaces:
 
 ## Run it locally
 
-It's a static site, but browsers block the OCR worker/WASM over `file://`, so serve
-it from the project folder with any static server, then open the URL it prints:
+This is a static site, but it **must be served over HTTP** — opening `index.html` directly
+(`file://`) will not work, because browsers block the OCR worker/WASM on `file://`. You need
+[Node.js](https://nodejs.org) **or** Python installed.
 
-```bash
-# Node (prints/copies the URL — defaults to http://localhost:3000)
-npx serve
+1. **Get the code.** On the repo page, green **`<> Code`** button → **Download ZIP** → unzip
+   it. (Or `git clone https://github.com/williamherndon07/label-verifier.git`.)
+2. **Open a terminal in the project folder** — the folder that contains `index.html`.
+3. **Start a static server:**
 
-# or Python (defaults to http://localhost:8000)
-python -m http.server 8000
-```
+   ```bash
+   # Node — serves at http://localhost:3000
+   npx serve
 
-The port depends on the server you use — open whichever address it prints. First load takes
-a few seconds to initialise the OCR engine; after that, each scan is fast.
+   # …or Python — serves at http://localhost:8000
+   python -m http.server 8000
+   ```
+
+4. **Open the URL it prints** in your browser (`http://localhost:3000` for `npx serve`,
+   `http://localhost:8000` for Python).
+
+First load takes a few seconds to initialise the OCR engine; after that, each scan is fast.
 
 ### Test data
 
@@ -94,9 +102,14 @@ the saved form fields).
 ### Testing it
 
 The tool reads files from **your machine**, not from the server, so get the test set local
-first — clone the repo, or download it as a ZIP and unzip (required on the live GitHub Pages
-site; the app can't pull files from the repo on its own). All 88 products (label image +
-matching application) ship in this repo under `test-labels/`.
+first. The whole repo — app plus all 88 products — downloads in one click:
+
+> On the repository page, click the green **`<> Code`** button (top-right, next to **Add file**),
+> then **Download ZIP** at the bottom of the panel. Unzip it; the labels and applications are in
+> `test-labels/`. (Or `git clone` the repo if you prefer.)
+
+On the live GitHub Pages site you must do this — the app can't pull the files from the repo on
+its own.
 
 **Single submission — BETA Submitter interface.** Expand **BETA Submitter interface** and, from
 any product in `test-labels/single entry/<category>/<product>/`, add the label image
