@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Label Verification 42 — TTB Prototype</title>
+<script src="vendor/tesseract.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<style>
+  :root{
+    --ink:#1b1f24; --muted:#5a6470; --line:#d6dbe1; --bg:#f3f5f7; --panel:#ffffff;
+    --match:#1f7a3d; --match-bg:#e8f5ec; --review:#9a6700; --review-bg:#fcf3da;
+    --miss:#b3261e; --miss-bg:#fbe9e8; --accent:#1b4d8f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{background:var(--panel);border-bottom:2px solid var(--line);padding:20px 24px;}
+  header h1{margin:0;font-size:24px;font-weight:700;}
+  header p{margin:4px 0 0;color:var(--muted);font-size:16px;}
+  main{max-width:760px;margin:0 auto;padding:24px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px;}
+  h2{margin:0 0 16px;font-size:18px;}
+  label{display:block;font-weight:600;font-size:16px;margin:14px 0 6px;}
+  input[type=text]{width:100%;padding:12px 14px;font-size:17px;border:1px solid var(--line);
+    border-radius:8px;background:#fff;}
+  input[type=text]:focus,button:focus,.drop:focus-within{outline:3px solid #99c0ff;outline-offset:1px;}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:26px;text-align:center;
+    cursor:pointer;background:#fafbfc;}
+  .drop.has{border-style:solid;border-color:var(--accent);}
+  .drop p{margin:6px 0;color:var(--muted);font-size:15px;}
+  #preview{max-width:100%;max-height:240px;margin-top:12px;border-radius:8px;display:none;}
+  button{margin-top:20px;width:100%;padding:15px;font-size:18px;font-weight:700;color:#fff;
+    background:var(--accent);border:0;border-radius:8px;cursor:pointer;}
+  button[disabled]{background:#9aa6b4;cursor:not-allowed;}
+  .status{margin-top:14px;font-size:15px;color:var(--muted);min-height:22px;}
+  .verdict{font-size:20px;font-weight:700;padding:14px 16px;border-radius:8px;margin-bottom:16px;}
+  .result{border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:12px;}
+  .result .top{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .result .name{font-weight:700;font-size:16px;}
+  .badge{font-size:13px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap;}
+  .b-match{color:var(--match);background:var(--match-bg);}
+  .b-review{color:var(--review);background:var(--review-bg);}
+  .b-miss{color:var(--miss);background:var(--miss-bg);}
+  .v-match{color:var(--match);background:var(--match-bg);}
+  .v-review{color:var(--review);background:var(--review-bg);}
+  .v-miss{color:var(--miss);background:var(--miss-bg);}
+  .kv{font-size:14px;color:var(--muted);margin-top:8px;line-height:1.45;}
+  .kv b{color:var(--ink);font-weight:600;}
+  .empty{color:var(--muted);font-size:15px;}
+  details{margin-top:14px;font-size:14px;color:var(--muted);}
+  summary{cursor:pointer;}
+  details.manual{margin-top:18px;border:1px solid var(--line);border-radius:8px;color:var(--ink);}
+  details.manual>summary{list-style:none;padding:14px 16px;font-weight:700;font-size:16px;color:var(--accent);}
+  details.manual>summary::-webkit-details-marker{display:none;}
+  details.manual>summary::before{content:"+  ";}
+  details.manual[open]>summary::before{content:"\2212  ";}
+  details.manual .inner{padding:0 16px 16px;}
+  .hint{color:var(--muted);font-size:14px;margin:0 0 4px;}
+  .bulkbox{margin-top:18px;border-top:1px solid var(--line);padding-top:16px;}
+  button.secondary{background:#fff;color:var(--accent);border:1px solid var(--accent);margin-top:8px;}
+  .bulkwrap{overflow-x:auto;}
+  table.bulk{border-collapse:collapse;width:100%;font-size:13px;}
+  table.bulk th,table.bulk td{border:1px solid var(--line);padding:7px 8px;text-align:center;white-space:nowrap;}
+  table.bulk th{background:#f3f5f7;font-size:12px;}
+  table.bulk td.fn{text-align:left;max-width:160px;overflow:hidden;text-overflow:ellipsis;font-weight:600;}
+  table.bulk td.bc .badge{font-size:12px;padding:3px 8px;}
+  pre{white-space:pre-wrap;background:#f6f8fa;padding:12px;border-radius:8px;font-size:13px;}
+
+  /* ---- review UX (BUILD 15) ---- */
+  .loading{display:flex;flex-direction:column;align-items:center;gap:12px;padding:34px 0;color:var(--muted);}
+  .spin{width:34px;height:34px;border:4px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  .ltext{font-size:16px;}
+  .timer{font-variant-numeric:tabular-nums;font-size:30px;font-weight:800;color:var(--accent);}
+  .banner{border-radius:10px;padding:18px 20px;margin-bottom:16px;display:flex;flex-direction:column;gap:2px;}
+  .banner .big{font-size:25px;font-weight:800;}
+  .banner .sub{font-size:14px;opacity:.85;}
+  .banner.ok{background:var(--match-bg);color:var(--match);}
+  .banner.rev{background:var(--review-bg);color:var(--review);}
+  .banner.bad{background:var(--miss-bg);color:var(--miss);}
+  .diffrow{margin-bottom:12px;}
+  .difflab{font-size:15px;margin-bottom:6px;}
+  .difflab b{font-size:18px;}
+  .diffnote{color:var(--muted);font-size:13px;margin-left:8px;text-transform:capitalize;}
+  .diffbar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;}
+  .diffbar i{display:block;height:100%;border-radius:6px;transition:width .5s ease;}
+  .diffbar i.dlo{background:var(--match);} .diffbar i.dmid{background:var(--review);} .diffbar i.dhi{background:var(--miss);}
+  .timing{font-size:14px;color:var(--muted);margin-bottom:16px;}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;}
+  .act{width:auto;margin:0;padding:11px 16px;font-size:15px;background:#fff;color:var(--accent);
+    border:1.5px solid var(--accent);border-radius:8px;cursor:pointer;font-weight:700;}
+  .act.on{background:var(--accent);color:#fff;}
+  .act.warn{color:var(--review);border-color:var(--review);}
+  .act.warn.on{background:var(--review);color:#fff;}
+  .act.email{margin-top:14px;width:100%;background:var(--accent);color:#fff;border-color:var(--accent);}
+  .viewbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 4px;}
+  .act.ghost{padding:7px 13px;font-size:13px;font-weight:600;}
+  .viewnote{font-size:12px;color:var(--muted,#888);}
+  .pagetools{display:flex;justify-content:flex-end;margin:0 0 10px;}
+  @media print{
+    .back,.pagetools,.viewbar,.act.email,.emailwrap{display:none !important;}
+    details>summary{list-style:none;}
+    details:not([open])>:not(summary){display:block !important;}
+    .rimg,.procimg{max-width:60% !important;}
+  }
+  .qcpanel,.dfpanel{border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-top:12px;}
+  .qcpanel h3,.dfpanel h3{margin:0 0 8px;font-size:15px;}
+  .qcrow,.dfrow{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line);}
+  .qcrow:last-of-type,.dfrow:last-of-type{border-bottom:none;}
+  .qok{color:var(--match);font-weight:800;font-size:17px;line-height:1.3;}
+  .qd{font-size:13px;color:var(--muted);margin-top:3px;line-height:1.45;}
+  .emailbox{margin-top:12px;border-top:1px dashed var(--line);padding-top:12px;}
+  .efield{font-size:14px;margin-bottom:6px;}
+  .ebody{width:100%;font:14px/1.55 system-ui,sans-serif;padding:10px;border:1px solid var(--line);border-radius:8px;resize:vertical;}
+  .sent{color:var(--match);font-weight:700;font-size:16px;padding:12px 0 4px;}
+  .alldetail,.rawtext{margin-top:14px;}
+  .alldetail[open]{margin-bottom:4px;} .alldetail .result{margin-top:10px;}
+
+  /* ---- screens / restructure (BUILD 17) ---- */
+  .screen[hidden]{display:none;}
+  .home-intro{color:var(--muted);font-size:15px;margin:0 0 18px;}
+  details.opt{border:1px solid var(--line);border-radius:10px;margin-bottom:16px;background:var(--panel);overflow:hidden;}
+  details.opt>summary{list-style:none;cursor:pointer;padding:18px 20px;font-size:19px;font-weight:700;
+    display:flex;align-items:center;justify-content:space-between;}
+  details.opt>summary::-webkit-details-marker{display:none;}
+  details.opt>summary .chev{color:var(--accent);font-weight:700;transition:transform .2s;font-size:22px;}
+  details.opt[open]>summary .chev{transform:rotate(90deg);}
+  .opt-body{padding:0 20px 20px;}
+  .mode-note{background:#eef4fb;color:var(--accent);font-size:13px;font-weight:600;padding:9px 12px;border-radius:7px;margin-bottom:14px;}
+  .mode-note.forced{background:var(--review-bg);color:var(--review);}
+  .chosen{font-size:14px;margin-top:10px;font-weight:600;color:var(--ink);}
+  .chosen.empty{color:var(--muted);font-weight:400;}
+  details.manual2{margin-top:14px;border:1px solid var(--line);border-radius:8px;}
+  details.manual2>summary{cursor:pointer;padding:12px 14px;font-weight:700;font-size:15px;color:var(--accent);list-style:none;}
+  details.manual2>summary::-webkit-details-marker{display:none;}
+  details.manual2>summary::before{content:"+  ";}
+  details.manual2[open]>summary::before{content:"\2212  ";}
+  details.manual2 .inner{padding:0 14px 14px;}
+  .verifybtn{margin-top:18px;}
+  .engine{font-size:13px;color:var(--muted);margin-top:10px;min-height:18px;}
+  /* loading */
+  .loadwrap{text-align:center;padding:70px 0;}
+  .loadwrap .spin{margin:0 auto 18px;width:46px;height:46px;border:5px solid var(--line);
+    border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;}
+  .loadwrap .ltext{font-size:17px;color:var(--muted);margin-bottom:10px;}
+  .loadwrap .timer{font-size:42px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;}
+  /* results */
+  .back{background:none;border:0;color:var(--accent);font-weight:700;font-size:15px;cursor:pointer;padding:0;margin:0 0 14px;width:auto;}
+  details.resultdrop,details.filedrop{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden;}
+  details.resultdrop>summary,details.filedrop>summary{list-style:none;cursor:pointer;padding:14px 16px;font-weight:700;
+    display:flex;align-items:center;gap:12px;}
+  details.resultdrop>summary::-webkit-details-marker,details.filedrop>summary::-webkit-details-marker{display:none;}
+  .filedrop .fname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .filedrop .fdiff{color:var(--muted);font-size:13px;font-weight:700;}
+  .rcontent{padding:0 16px 16px;}
+  .rimg{display:block;max-width:100%;max-height:230px;margin:0 auto 14px;border:1px solid var(--line);border-radius:8px;}
+  /* compact ROW table */
+  table.rt{border-collapse:collapse;width:100%;font-size:14px;}
+  table.rt th{background:#f3f5f7;text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.03em;
+    color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line);}
+  table.rt td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  table.rt tr:last-child td{border-bottom:none;}
+  td.rf{font-weight:700;white-space:nowrap;width:1%;}
+  td.rd .rdetail{color:var(--muted);font-size:12px;margin-top:3px;line-height:1.4;}
+  td.rs{text-align:right;white-space:nowrap;width:1%;}
+  .bulkcount{font-size:14px;color:var(--muted);margin-bottom:14px;}
+  .emailwrap{margin-top:14px;}
+  .scanbox pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;padding:14px;border-radius:8px;font-size:13px;line-height:1.5;max-height:360px;overflow:auto;margin:0;}
+  .linetbl{width:100%;border-collapse:collapse;margin-top:4px;font-size:13px;}
+  .linetbl th,.linetbl td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .linetbl td.cf,.linetbl th.cf{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .conf-hi{color:#15803d;font-weight:700;} .conf-mid{color:#b45309;font-weight:700;} .conf-lo{color:#b91c1c;font-weight:700;}
+  .procimg{max-width:100%;border:1px solid var(--line);border-radius:8px;}
+  .bulksec{margin-bottom:18px;}
+  .bulksec>summary.bulkh{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:17px;font-weight:800;margin:0 0 10px;padding:10px 14px;border-radius:8px;}
+  .bulksec>summary.bulkh::-webkit-details-marker{display:none;}
+  .bulksec>summary.bulkh::after{content:"\25B8";margin-left:auto;font-size:14px;transition:transform .15s;}
+  .bulksec[open]>summary.bulkh::after{transform:rotate(90deg);}
+  .bulkh .cnt{font-size:13px;font-weight:700;background:rgba(255,255,255,.65);border-radius:999px;padding:1px 9px;}
+  .sec-pass>summary.bulkh{background:#dcfce7;color:#166534;}
+  .sec-fail>summary.bulkh{background:#fee2e2;color:#991b1b;}
+  .sec-inf>summary.bulkh{background:#dbeafe;color:#1e40af;}
+  .bulkempty{color:var(--muted);font-size:14px;padding:2px 4px 8px;}
+  .bulkbtns{display:flex;gap:10px;margin:-6px 0 10px;}
+  .minibtn{flex:1;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--accent);font-weight:700;font-size:14px;cursor:pointer;}
+  .minibtn:hover{background:#f1f5f9;}
+  .ftag{font-size:11px;font-weight:700;color:var(--muted);background:#f1f5f9;border-radius:999px;padding:1px 8px;margin-left:8px;}
+  .b-info{background:#e2e8f0;color:#334155;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Label Verification 42</h1>
+  <p>Verify alcohol labels against TTB mandatory fields. Runs entirely in your browser.</p>
+</header>
+
+<main>
+  <!-- HOME -->
+  <section class="screen" id="screen-home">
+    <p class="home-intro">Choose how to verify, then select Verify.</p>
+
+    <details class="opt" id="optSingle">
+      <summary>BETA Submitter interface <span class="chev">&#8250;</span></summary>
+      <div class="opt-body">
+        <div class="mode-note"><b>Application file recommended.</b> Manual entry could make mistakes.<br>(Manual entry required if an application is not provided.)<br><span style="color:var(--muted)">Drop the COLA application (PDF) to auto-fill the expected values, then add the label. The tool searches the label for each value.</span></div>
+        <div class="drop" id="aDrop" tabindex="0" role="button" aria-label="Upload application PDF">
+          <p><b>1 &middot; Application (PDF) &mdash; optional</b></p>
+          <p>auto-fills the expected values below</p>
+        </div>
+        <input id="aFile" type="file" accept="application/pdf,.pdf" hidden />
+        <div class="chosen empty" id="aChosen">No application loaded.</div>
+        <div class="drop" id="sDrop" tabindex="0" role="button" aria-label="Choose a label image">
+          <p><b>2 &middot; Label image &mdash; tap to choose</b></p>
+          <p>or drag a file here (PNG or JPG)</p>
+        </div>
+        <input id="sFile" type="file" accept="image/*" hidden />
+        <div class="chosen empty" id="sChosen">No file chosen.</div>
+
+        <details class="manual2" id="manualBox" open>
+          <summary>Manual entry of details</summary>
+          <div class="inner">
+            <p class="hint">These mirror the COLA application. An application PDF fills them in automatically. With no application, the required fields (<b>*</b>) must be completed before Verify is available.</p>
+            <label for="brand">Brand name *</label>
+            <input id="brand" type="text" placeholder="e.g. OLD TOM DISTILLERY" />
+            <label for="fanciful">Fanciful name</label>
+            <input id="fanciful" type="text" placeholder="e.g. Midnight Reserve" />
+            <label for="classtype">Class / type *</label>
+            <input id="classtype" type="text" placeholder="e.g. Kentucky Straight Bourbon Whiskey" />
+            <label for="alcohol">Alcohol content *</label>
+            <input id="alcohol" type="text" placeholder="e.g. 45% Alc./Vol." />
+            <label for="proof">Proof</label>
+            <input id="proof" type="text" placeholder="e.g. 90 Proof" />
+            <label for="net">Net contents *</label>
+            <input id="net" type="text" placeholder="e.g. 750 mL" />
+            <label for="imported">Imported?</label>
+            <select id="imported"><option value="no">No &mdash; domestic</option><option value="yes">Yes &mdash; imported</option></select>
+            <label for="origin">Origin (country, if imported)</label>
+            <input id="origin" type="text" placeholder="e.g. Scotland" />
+            <label for="producer">Producer / bottler</label>
+            <input id="producer" type="text" placeholder="e.g. Old Tom Distillery" />
+            <label for="address">Producer / importer address</label>
+            <input id="address" type="text" placeholder="e.g. Louisville, KY" />
+            <label for="memail">Contact email</label>
+            <input id="memail" type="email" placeholder="e.g. compliance@brand.example" />
+            <label for="labelh">Label height in inches <span style="font-weight:400;color:var(--muted)">&mdash; optional</span></label>
+            <input id="labelh" type="text" inputmode="decimal" placeholder="e.g. 4.0" />
+          </div>
+        </details>
+
+        <button class="verifybtn" id="verifySingle" disabled>Loading OCR engine&hellip;</button>
+        <div class="engine" id="engineS" aria-live="polite"></div>
+      </div>
+    </details>
+
+    <details class="opt" id="optBulk">
+      <summary>Agent Interface tool <span class="chev">&#8250;</span></summary>
+      <div class="opt-body">
+        <div class="mode-note forced">Handles a <b>single label or a batch</b> (up to 100). Drop a <b>folder</b> of label+application subfolders, or pick files. Each label is paired with its application &mdash; by folder, or by matching filename. A label with no application runs detection-only.</div>
+        <div class="mode-note">Processing is local and single-threaded &mdash; roughly 1.5s per label. Approximate run times: <b>20</b> labels &asymp; 30s &middot; <b>40</b> &asymp; 1 min &middot; <b>60</b> &asymp; 1.5 min &middot; <b>80</b> &asymp; 2 min &middot; <b>100</b> &asymp; 2.5 min. Keep this tab focused while it runs.</div>
+        <div class="drop" id="bDrop" tabindex="0" role="button" aria-label="Choose labels and applications">
+          <p><b>Drag a folder or files here</b></p>
+          <p>labels (PNG/JPG) + applications (PDF) &mdash; up to 100</p>
+        </div>
+        <div class="bulkbtns">
+          <button type="button" class="minibtn" id="bPickFiles">Choose files</button>
+          <button type="button" class="minibtn" id="bPickFolder">Choose folder</button>
+        </div>
+        <input id="bFile" type="file" accept="image/*,application/pdf,.pdf" multiple hidden />
+        <input id="bFolder" type="file" multiple hidden />
+        <div class="chosen empty" id="bChosen">Nothing chosen.</div>
+
+        <button class="verifybtn" id="verifyBulk" disabled>Loading OCR engine&hellip;</button>
+        <div class="engine" id="engineB" aria-live="polite"></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- LOADING -->
+  <section class="screen" id="screen-loading" hidden>
+    <div class="loadwrap">
+      <div class="spin"></div>
+      <div class="ltext" id="loadMsg">Reading&hellip;</div>
+      <div class="timer" id="loadTimer">0.0s</div>
+    </div>
+  </section>
+
+  <!-- SINGLE RESULTS -->
+  <section class="screen" id="screen-single" hidden>
+    <button class="back" data-home>&#8249; Verify another</button>
+    <div id="singleBody"></div>
+  </section>
+
+  <!-- BULK RESULTS -->
+  <section class="screen" id="screen-bulk" hidden>
+    <button class="back" data-home>&#8249; Verify more</button>
+    <div id="bulkBody"></div>
+  </section>
+
+</main>
+
+<script>
+/* ---------- The fixed statutory health warning (27 CFR 16.21) ---------- */
+const HEALTH_WARNING =
+  "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not " +
+  "drink alcoholic beverages during pregnancy because of the risk of birth defects. " +
+  "(2) Consumption of alcoholic beverages impairs your ability to drive a car or " +
+  "operate machinery, and may cause health problems.";
+
+/* ---------- text helpers ---------- */
+const norm = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g," ");
+
+function lev(a,b){
+  const m=a.length,n=b.length; if(!m)return n; if(!n)return m;
+  let prev=Array.from({length:n+1},(_,i)=>i),cur=new Array(n+1);
+  for(let i=1;i<=m;i++){cur[0]=i;
+    for(let j=1;j<=n;j++){
+      const c=a[i-1]===b[j-1]?0:1;
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+c);
+    } [prev,cur]=[cur,prev];
+  } return prev[n];
+}
+const ratio=(a,b)=>{const M=Math.max(a.length,b.length);return M?1-lev(a,b)/M:1;};
+
+// best fuzzy ratio of `needle` against any same-length window in `hay`
+function bestWindow(needle, hay){
+  const N=norm(needle), H=norm(hay);
+  if(!N) return 0;
+  if(H.includes(N)) return 1;
+  const nl=N.length, hl=H.length;
+  if(hl<nl) return ratio(N,H);
+  let best=0;
+  for(let i=0;i+nl<=hl;i+=Math.max(1,Math.floor(nl/6))){
+    best=Math.max(best, ratio(N, H.substr(i,nl)));
+    if(best===1) break;
+  }
+  return best;
+}
+
+const MATCH="match", REVIEW="review", MISS="miss";
+function tier(score, hi=0.90, lo=0.74){
+  if(score>=hi) return MATCH;
+  if(score>=lo) return REVIEW;
+  return MISS;
+}
+
+/* ---------- detection (primary) + optional cross-check (secondary) ---------- */
+const row=(name,detected,expected,status,detail)=>({name,detected,expected,status,detail});
+function toMl(v,unit){unit=(unit||"").toLowerCase().replace(/[^a-z]/g,""); if(unit==="l")return v*1000; if(unit==="cl")return v*10; if(unit==="floz"||unit==="oz"||unit==="flo")return v*29.5735; return v;}
+// Parse any volume string (label OCR or application value) -> {ml, str} or null. Handles metric
+// (mL/cL/L incl. decimals like 1.75 L) and US imperial (FL OZ / FL. OZ. / OZ), tolerating the
+// common OCR misread of "OZ" as "0Z".
+function parseVolStr(s){
+  if(!s) return null;
+  // OCR commonly misreads "OZ" as "0Z" or "02" (zero), esp. after FL/FL. — normalize before matching
+  const t=String(s).replace(/(\bfl\.?\s*)0\s*[2zZ]\b/gi,"$1OZ").replace(/0Z\b/gi,"OZ");
+  let m=t.match(/(\d+(?:\.\d+)?)\s*(ml|cl|l)\b/i);
+  if(m){ const u=m[2].toLowerCase(); return {ml:toMl(parseFloat(m[1]),u), str:`${m[1]} ${u==="l"?"L":u==="cl"?"cL":"mL"}`}; }
+  m=t.match(/(\d+(?:\.\d+)?)\s*fl\.?\s*oz\b/i) || t.match(/(\d+(?:\.\d+)?)\s*oz\b/i);
+  if(m){ const v=parseFloat(m[1]); return {ml:Math.round(v*29.5735), str:`${m[1]} fl oz`}; }
+  // spelled-out units: "375 MILLILITERS", "1.5 LITERS", "12 FLUID OUNCES"
+  m=t.match(/(\d+(?:\.\d+)?)\s*milli\s*lit(?:er|re)s?\b/i);
+  if(m){ return {ml:parseFloat(m[1]), str:`${m[1]} mL`}; }
+  m=t.match(/(\d+(?:\.\d+)?)\s*(?:fluid\s*ounces?|ounces?)\b/i);
+  if(m){ const v=parseFloat(m[1]); return {ml:Math.round(v*29.5735), str:`${m[1]} fl oz`}; }
+  m=t.match(/(\d+(?:\.\d+)?)\s*lit(?:er|re)s?\b/i);
+  if(m){ return {ml:parseFloat(m[1])*1000, str:`${m[1]} L`}; }
+  return null;
+}
+
+// fraction of letters among non-space chars — used to skip OCR garbage like "=233S¢2—"
+const cleanScore=t=>{const n=(t||"").replace(/\s/g,"");if(!n)return 0;return (t.match(/[A-Za-z]/g)||[]).length/n.length;};
+
+// Brand = the most prominent (tallest) CLEAN text line on the label.
+// Excludes the government-warning text and rotated/vertical columns, which OCR can render as a
+// single very tall line that would otherwise win on height (e.g. a warning printed up the side).
+const BRAND_WARN_RE=/(surgeon general|government warning|pregnancy|birth defects|operate machinery|impairs your ability|health problems|alcoholic beverages|risk of|not drink)/i;
+function brandEligible(l){
+  if(BRAND_WARN_RE.test(l.text)) return false;
+  if(l.bbox){ const w=l.bbox.x1-l.bbox.x0, h=l.bbox.y1-l.bbox.y0; if(w>0 && h/w>1.6) return false; } // vertical column
+  return true;
+}
+function detectBrand(lines){
+  const elig=lines.filter(brandEligible);
+  const ok=elig.filter(l=>(l.text.match(/[A-Za-z]/g)||[]).length>=3 && cleanScore(l.text)>=0.8);
+  const pool=ok.length?ok:(elig.length?elig:lines);
+  let best=null,bh=-1;
+  for(const l of pool){const h=l.bbox.y1-l.bbox.y0; if(h>bh){bh=h;best=l;}}
+  if(!best) return null;
+  return {text:best.text.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g,""), conf:best.conf!=null?best.conf:100};
+}
+const CLASS_KEYWORDS=["bourbon","whiskey","whisky","rye","scotch","vodka","gin","rum",
+  "tequila","mezcal","agave","brandy","cognac","armagnac","calvados","liqueur","cordial",
+  "spirits","aquavit","akvavit","schnapps","absinthe","vermouth","grappa","pisco","soju",
+  "sake","mead","moonshine","wine","cabernet","chardonnay","merlot","sauvignon","riesling",
+  "zinfandel","pinot","rose","port","sherry","madeira","prosecco","champagne","sparkling",
+  "ale","lager","stout","pilsner","porter","ipa","beer","malt","cider"];
+// Flavored / infused = formula-approval / distilled-spirits-specialty territory (statement of
+// composition), NOT a class failure. Detected from the label OR the application class.
+const INFUSE_CUES=/(infus|flavou?r|spiced|cordial|liqueur|\bwith natural\b|cinnamon|coffee|cherry|citrus|peach|apple|cold ?brew|herbal|botanical)/i;
+function detectInfused(ocr, expClass){ return INFUSE_CUES.test(ocr||"") || INFUSE_CUES.test(expClass||""); }
+function classMatch(text){
+  const toks=text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  for(const k of CLASS_KEYWORDS){ if(toks.includes(k)) return k; }       // exact whole word
+  // OCR clip tolerance only for longer words (whiskey/whisky, pilsner) — never short ones
+  for(const k of CLASS_KEYWORDS){ if(k.length>=6 && toks.some(tk=>tk.length>=5 && (tk.startsWith(k)||k.startsWith(tk)))) return k; }
+  return null;
+}
+function detectClass(lines){
+  let fallback=null;
+  for(const l of lines){
+    if(classMatch(l.text)){
+      if(cleanScore(l.text)>=0.7) return l.text.trim();
+      if(!fallback) fallback=l.text.trim();
+    }}
+  return fallback;
+}
+
+// RULE: match the application's field text against the label OCR ignoring case, punctuation,
+// and spacing ("dark beer" == "DARK BEER" == "Dark Beer" == "D A R K B E E R"). A field counts
+// as found if the whole value appears in the OCR text, OR if every significant word of it does.
+// If it is NOT found, we say so plainly — we never substitute a gibberish OCR fragment.
+const FIELD_STOP=["of","the","and","my","an","a","with"];
+function fieldFound(expected, hay){
+  const nm=s=>(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const H=nm(hay); if(!H) return false;
+  const N=nm(expected);
+  if(N && H.includes(N)) return true;                       // whole value present (any case/format)
+  // A word counts as found if it's present, OR (for longer words) if a contiguous run of it appears
+  // with up to 2 end-characters clipped — OCR routinely drops a leading/trailing letter on stylized
+  // caps (e.g. "MONDAY" read as "NDAY"). Conservative: only words >=5 chars, run length >= len-2 & >=4.
+  const has=w=>{
+    const k=nm(w); if(H.includes(k)) return true;
+    if(k.length<5) return false;
+    const minLen=Math.max(4,k.length-2);
+    for(let i=0;i+minLen<=k.length;i++){ if(H.includes(k.substr(i,minLen))) return true; }
+    return false;
+  };
+  const words=(expected||"").toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>=3 && FIELD_STOP.indexOf(w)<0);
+  return words.length>0 && words.every(has);                // all significant words present (clip-tolerant)
+}
+function checkBrandField(lines, expected){
+  if(expected && expected.trim()){
+    const hay=lines.map(l=>l.text).join("  ");
+    if(fieldFound(expected, hay))
+      return row("Brand name", expected, expected, MATCH, "Brand text found on the label (matched ignoring case/spacing).");
+    // Genuinely not in the OCR text \u2014 likely a stylized/logo title the engine couldn't read.
+    // Do NOT show a gibberish fragment.
+    return row("Brand name", "(not found on label)", expected, REVIEW,
+      "The application brand was not found in the label text \u2014 it may be stylized/logo art the OCR couldn\u2019t read. Verify by eye.");
+  }
+  const d=detectBrand(lines); const det=d?d.text:null;
+  if(!det) return row("Brand name","(not found)","\u2014",MISS,"No prominent brand text detected.");
+  const lowConf=d.conf<70, frag=det.replace(/[^A-Za-z0-9]/g,"").length<4;
+  if(lowConf||frag) return row("Brand name", det, "\u2014", REVIEW,
+    `Read with low confidence (${d.conf|0}%) \u2014 verify the brand manually.`);
+  return row("Brand name", det, "\u2014", MATCH, "Detected as the most prominent text.");
+}
+function checkClassField(lines, expected){
+  const det=detectClass(lines);
+  const hay=lines.map(l=>l.text).join("  ");
+  // Flavored / infused specialty: PASS (statement of composition / formula). Not a class failure.
+  if(detectInfused(hay, expected)){
+    return Object.assign(row("Class / type", det||expected||"flavored / infused", expected||"\u2014", MATCH,
+      "Flavored / infused product \u2014 distilled-spirits specialty. Class wording is not a compliance fail."),
+      {badgeText:"Infused \u00b7 Pass", badgeClass:"b-match"});
+  }
+  if(expected && expected.trim()){
+    if(fieldFound(expected, hay))
+      return row("Class / type", expected, expected, MATCH, "Class/type text found on the label (matched ignoring case/spacing).");
+    return row("Class / type", "(not found on label)", expected, REVIEW,
+      "The application class/type was not found in the label text \u2014 verify by eye.");
+  }
+  return row("Class / type", det||"(not found)", "\u2014", det?MATCH:MISS,
+    det?"Recognized beverage class detected.":"No recognized class/type detected.");
+}
+function checkAlcoholField(ocr, expected){
+  // ABV: anchor on the "%" sign and read up to 4 characters immediately to its left, then pull the
+  // number out of that window (handles "13.0%", "11.5%", "6.2%", "40%" — and avoids grabbing a far-off
+  // stray number that isn't actually adjacent to a percent sign).
+  // ABV rule: anchor on "%", then read a number to its left — up to 5 characters, tolerating at most
+  // 2 spaces between the number and the "%", and stopping as soon as the run of numbers ends.
+  let pcts=[];
+  for(const m of ocr.matchAll(/%/g)){
+    const left=ocr.slice(Math.max(0,m.index-7), m.index);   // 5-char number + up to 2 spaces
+    const num=(left.match(/(\d[\d.]{0,4})\s{0,2}$/)||[])[1];
+    if(num){ const p=parseFloat(num); if(p>0&&p<=95) pcts.push(p); }
+  }
+  const proofs=[...ocr.matchAll(/(\d+(?:\.\d+)?)\s*proof/ig)].map(m=>parseFloat(m[1])).filter(p=>p>0&&p<=200);
+  let dProof=proofs.length?proofs[0]:null;
+  const vol=(ocr.match(/(\d{3,4})\s*ml\b/i)||[])[1];
+  // proof stacked: "90" and "PROOF" on separate lines — take a proof-like bare number
+  if(dProof==null && /\bproof\b/i.test(ocr)){
+    const cand=[...ocr.matchAll(/\b(\d{2,3})\b/g)].map(m=>parseInt(m[1]))
+      .filter(n=>n>=60&&n<=140&&n%2===0&&String(n)!==vol);
+    if(cand.length) dProof=cand[0];
+  }
+  // when several % candidates exist, prefer the one consistent with proof (proof ≈ 2×ABV)
+  if(dProof!=null && pcts.length>1){ const t=dProof/2; pcts=[...pcts].sort((a,b)=>Math.abs(a-t)-Math.abs(b-t)); }
+  let dPct=pcts.length?pcts[0]:null, abvInferred=false;
+  // ABV recovery (same approach as net): the "%" wasn't read directly —
+  // anchor on the ALC./VOL. label, then derive from proof if needed.
+  if(dPct==null){
+    if(/\balc/i.test(ocr)||/\bvol\b/i.test(ocr)){
+      let cand=[...ocr.matchAll(/\b(\d{1,2}(?:\.\d)?)\b/g)].map(m=>parseFloat(m[1]))
+        .filter(n=>n>=4&&n<=70&&String(n)!==vol);
+      if(dProof!=null && cand.length){ const t=dProof/2; cand=[...cand].sort((a,b)=>Math.abs(a-t)-Math.abs(b-t)); }
+      if(cand.length){ dPct=cand[0]; abvInferred=!(dProof!=null&&Math.abs(dPct-dProof/2)<=1); }
+    }
+    if(dPct==null && dProof!=null){ dPct=dProof/2; abvInferred=true; } // last resort: ABV = proof / 2
+  }
+  const det=dPct!=null?(dProof!=null?`${dPct}% Alc./Vol. (${dProof} Proof)`:`${dPct}% Alc./Vol.`):null;
+  if(expected && expected.trim()){
+    const ePct=(expected.match(/(\d+(?:\.\d+)?)\s*%/)||[])[1];
+    if(dPct==null) return row("Alcohol content","(not read)",expected,REVIEW,"Alcohol content could not be read off the label to compare against the application \u2014 needs a human look.");
+    if(ePct==null) return row("Alcohol content",det,expected,REVIEW,"No percent in application value to compare.");
+    const ok=Math.abs(dPct-parseFloat(ePct))<=0.15;
+    return row("Alcohol content",det,expected, ok?MATCH:REVIEW, ok?"Matches application value.":"Differs from the application value \u2014 needs a human look (OCR misread or real discrepancy).");
+  }
+  if(dPct==null) return row("Alcohol content","(not found)","\u2014",MISS,"Mandatory alcohol content not detected.");
+  if(abvInferred) return row("Alcohol content",det,"\u2014",REVIEW,
+    "ABV inferred from proof/panel; the % wasn\u2019t read cleanly \u2014 verify.");
+  if(dProof!=null){
+    const consistent=Math.abs(dProof-2*dPct)<=1;
+    return row("Alcohol content",det,"\u2014", consistent?MATCH:REVIEW,
+      consistent?"Present; proof is consistent with the ABV.":"Present, but proof is not consistent with the stated ABV (possible misread).");
+  }
+  return row("Alcohol content",det,"\u2014",MATCH,"Present on label.");
+}
+const COMMON_ML=[50,100,187,200,355,375,500,700,720,750,1000,1750];
+// measurement-unit anchor -> mL factor + display unit
+function unitInfo(u){
+  const k=(u||"").toLowerCase().replace(/[^a-z]/g,"");
+  if(/^lit(er|re)s?$/.test(k)||k==="l")                       return {f:1000, disp:"L"};
+  if(k==="cl")                                                 return {f:10,   disp:"cL"};
+  if(/^(floz|fluidoz|oz|ounces?|fluidounces?)$/.test(k))       return {f:29.5735, disp:"fl oz"};
+  return {f:1, disp:"mL"};   // ml / milliliter(s) / millilitre(s)
+}
+// ANCHOR on the measurement, then read the number near it (same 5-rule as %, plus a surrounding window
+// so a stacked "750" above "ML" is still picked up). Direction-agnostic, no per-label assumptions.
+function detectVolume(ocr){
+  const t=ocr.replace(/(\bfl\.?\s*)0\s*[2zZ]\b/gi,"$1OZ").replace(/0Z\b/gi,"OZ");
+  // (?<![a-z]) lets the unit sit right after a digit ("1.75L", "750ML") but not inside a word ("VOL")
+  const unitRe=/(?<![a-z])(milli\s*lit(?:er|re)s?|lit(?:er|re)s?|fluid\s*ounces?|fl\.?\s*oz|ounces?|ml|cl|oz|l)\b/gi;
+  const cands=[];
+  for(const m of t.matchAll(unitRe)){
+    const ui=unitInfo(m[1]);
+    // 5-rule: number up to ~5 chars left of the unit, tolerating <=2 spaces/newlines (handles stacked)
+    const left=t.slice(Math.max(0,m.index-8), m.index);
+    let num=(left.match(/(\d{1,4}(?:\.\d+)?)\s{0,2}$/)||[])[1];
+    // include surrounding: nothing adjacent -> scan a window around the anchor, prefer a standard size
+    if(num==null){
+      const win=t.slice(Math.max(0,m.index-32), Math.min(t.length,m.index+12));
+      const nums=[...win.matchAll(/\b(\d{1,4}(?:\.\d+)?)\b/g)].map(x=>parseFloat(x[1])).filter(n=>n>0&&n<=2000);
+      const common=nums.find(n=>COMMON_ML.includes(Math.round(n*ui.f)));
+      num = common!=null ? common : nums[0];
+    }
+    if(num==null) continue;
+    const v=parseFloat(num); const ml=Math.round(v*ui.f);
+    if(ml>=50) cands.push({ml, str:`${num} ${ui.disp}`});   // ignore noise reads (no beverage is <50 mL)
+  }
+  // prefer a candidate that lands on a standard bottle size
+  const common=cands.find(c=>COMMON_ML.includes(c.ml));
+  if(common) return common;
+  // else: last-resort whole-text standard-size scan (number/unit far apart or unit garbled)
+  const hit=[...t.matchAll(/\b(\d{2,4})\b/g)].map(x=>parseInt(x[1])).find(n=>COMMON_ML.includes(n));
+  if(hit) return {str:`${hit} mL`, ml:hit, inferred:true};
+  return cands[0]||null;
+}
+function checkNetField(ocr, expected){
+  const v=detectVolume(ocr);
+  const det=v?v.str:null, dMl=v?v.ml:null;
+  if(expected && expected.trim()){
+    const ev=parseVolStr(expected);
+    const eMl=ev?ev.ml:null;
+    if(dMl==null) return row("Net contents","(not read)",expected,REVIEW,"Net contents could not be read off the label to compare against the application \u2014 needs a human look.");
+    if(eMl==null) return row("Net contents",det,expected,REVIEW,"No volume in application value to compare.");
+    const ok=Math.abs(dMl-eMl)<=1;
+    return row("Net contents",det,expected, ok?MATCH:REVIEW, ok?"Matches application value.":"Differs from the application value \u2014 needs a human look.");
+  }
+  return row("Net contents", det||"(not found)", "\u2014",
+    det?(v.inferred?REVIEW:MATCH):MISS,
+    det?(v.inferred?"Volume detected; unit (mL/L) not clearly read \u2014 verify.":"Present on label."):"Mandatory net contents not detected.");
+}
+
+/* Import-only fields: shown only when the label has import indicators */
+function detectOrigin(ocr){
+  const m=ocr.match(/produc[te]\s+of\s+([A-Za-z][A-Za-z .'\-]{2,30})/i)
+       || ocr.match(/country\s+of\s+origin[:\s]+([A-Za-z][A-Za-z .'\-]{2,30})/i);
+  return m? m[0].trim().replace(/\s+/g," ") : null;
+}
+function detectImporter(ocr){
+  const m=ocr.match(/import(?:ed\s+by|er)[:\s]+([A-Za-z0-9][A-Za-z0-9 ,.&'\-]{2,60})/i);
+  return m? m[0].trim().replace(/\s+/g," ") : null;
+}
+// Imported products must carry a U.S. importer name and address (27 CFR). Driven by the
+// application's Origin field and by label cues; flags imports that lack a U.S. importer.
+function checkImport(ocr, expOrigin){
+  const foreign=/(scotland|ireland|mexico|canada|france|italy|spain|iceland|japan|germany|jamaica|barbados|england|united kingdom|middle.?earth|the shire)/i;
+  const appImported = /import/i.test(expOrigin) || (foreign.test(expOrigin) && !/domestic/i.test(expOrigin));
+  const labelImported = /\b(imported|hecho en|distilled in)\b/i.test(ocr) || foreign.test(ocr);
+  if(!(appImported||labelImported)) return null;            // domestic — no import row
+  const importer = detectImporter(ocr);
+  if(importer) return row("U.S. importer", importer, "\u2014", MATCH, "U.S. importer statement detected on label.");
+  return row("U.S. importer", "(not found)", "\u2014", MISS,
+    "Imported product \u2014 no U.S. importer name/address found on label (required for imports).");
+}
+
+// Distinctive terms from the statutory warning. Presence is scored by coverage (order-independent),
+// so the warning is detected from one sparse OCR pass even when its lines are scattered or in a side column.
+const WARN_TOKENS=["government","warning","surgeon","general","pregnancy","alcoholic",
+  "beverages","birth","defects","consumption","impairs","machinery","health","problems"];
+function warnCoverage(ocr){
+  const t=norm(ocr); let hit=0;
+  for(const w of WARN_TOKENS) if(t.includes(w)) hit++;
+  return {cov:hit/WARN_TOKENS.length, hit};
+}
+function checkWarning(ocr){
+  const {cov,hit}=warnCoverage(ocr);
+  const capsOk=/\bGOVERNMENT\b/.test(ocr) && /\bWARNING\b/.test(ocr);
+  const titleCase=/Government/.test(ocr) && /Warning/.test(ocr) && !capsOk;
+  const N=WARN_TOKENS.length;
+  let status, detail;
+  if(cov>=0.8 && capsOk){ status=MATCH; detail=`Warning present (${hit}/${N} key terms) with \u201CGOVERNMENT WARNING\u201D in capitals.`; }
+  else if(cov>=0.8 && titleCase){ status=REVIEW; detail=`Warning present (${hit}/${N} terms) but \u201CGovernment Warning\u201D is not in required all-caps.`; }
+  else if(cov>=0.8){ status=REVIEW; detail=`Warning text present (${hit}/${N} terms) but \u201CGOVERNMENT WARNING\u201D header not clearly detected \u2014 verify casing.`; }
+  else if(cov>=0.6){ status=REVIEW; detail=`Warning only partially detected (${hit}/${N} key terms) \u2014 verify it is complete.`; }
+  else { status=MISS; detail=`Required warning not found (${hit}/${N} key terms).`; }
+  const detected = cov>=0.6 ? "Statutory warning detected" : "Not found / altered";
+  return {name:"Health warning statement", status, detected, expected:"(fixed statutory text)", detail};
+}
+
+// C3: compare the read warning against the statutory text word-by-word, flag spelling/wording deviations
+function checkWarningWording(warnText){
+  // "Located" agrees with the statement check: either the contiguous statutory sentence assembles,
+  // OR keyword coverage is high (a vertical/garbled warning that the statement check confidently
+  // found). This prevents the contradiction where the statement + size checks pass but wording
+  // alone claims the warning is missing. When located, we report actual wording quality instead.
+  const located = bestWindow(HEALTH_WARNING,warnText)>=0.55 || warnCoverage(warnText).cov>=0.85;
+  if(!located)
+    return row("Warning wording","(warning not located)","exact statutory text",REVIEW,
+      "Warning not found, so wording could not be checked.");
+  const read=new Set(norm(warnText).split(" ").filter(Boolean));
+  const stat=[...new Set(norm(HEALTH_WARNING).split(" ").filter(w=>w.length>=4))];
+  const off=[];
+  for(const w of stat){
+    if(read.has(w)) continue;
+    let near=null;
+    for(const r of read){ const sc=ratio(r,w); if(sc>=0.6&&sc<1&&Math.abs(r.length-w.length)<=2){near=r;break;} }
+    off.push(near?`${w}\u2192${near}`:w);
+  }
+  if(!off.length) return row("Warning wording","exact","exact statutory text",MATCH,
+    "All statutory words present and correctly spelled.");
+  const show=off.slice(0,6).join(", ")+(off.length>6?"\u2026":"");
+  return row("Warning wording", `${off.length} word(s) off`, "exact statutory text",
+    off.length<=3?REVIEW:MISS,
+    `Possible spelling/wording deviations (verify against the printed label; some may be OCR noise): ${show}`);
+}
+
+/* flatten Tesseract block output into text lines with pixel bounding boxes */
+function flattenLines(data){
+  const lines=[];
+  const push=l=>{ if(l&&l.bbox&&l.text) lines.push({text:l.text,bbox:l.bbox,conf:(l.confidence!=null?l.confidence:100)}); };
+  if(Array.isArray(data.blocks)){
+    for(const b of data.blocks)
+      for(const p of (b.paragraphs||[]))
+        for(const l of (p.lines||[])) push(l);
+  } else if(Array.isArray(data.lines)){
+    for(const l of data.lines) push(l);
+  }
+  return lines;
+}
+
+/* TTB minimum warning type size by container volume (27 CFR 16.22) — used only as an
+   optional note when real dimensions are available */
+function minMmForVolume(netStr){
+  const ev=netStr.match(/(\d+(?:\.\d+)?)\s*(ml|l)\b/i);
+  if(!ev) return {mm:2, basis:"standard container"};
+  const ml=toMl(parseFloat(ev[1]),ev[2]);
+  if(ml<=237) return {mm:1, basis:"\u2264237 mL container"};
+  if(ml<=3000) return {mm:2, basis:"237 mL\u20133 L container"};
+  return {mm:3, basis:">3 L container"};
+}
+const median=arr=>{const a=[...arr].sort((x,y)=>x-y);return a.length?a[Math.floor(a.length/2)]:0;};
+
+/* Image-only detection: is the warning text buried / much smaller than the label's
+   BODY text? Baseline excludes the headline (brand) and junk so a normal warning isn't
+   false-flagged. If a label height is given, the mm estimate becomes authoritative. */
+function checkWarningSize(lines, imgPxHeight, labelInches, netStr){
+  const kw=/government warning|surgeon general|birth defects|consumption of|operate machinery|health problems|drive a car/i;
+  const wlines=lines.filter(l=>kw.test(l.text));
+  if(!wlines.length){
+    return {name:"Warning text size", status:REVIEW, detected:"not located", expected:"legible, not buried",
+      detail:"Could not locate the warning text to assess its size."};
+  }
+  // body = non-warning lines, dropping junk (<3 chars) and the single tallest (headline)
+  let body=lines.filter(l=>!kw.test(l.text) && l.text.replace(/[^a-z0-9]/gi,"").length>=3)
+                .map(l=>l.bbox.y1-l.bbox.y0).sort((a,b)=>b-a);
+  if(body.length>=2) body=body.slice(1);          // drop the brand headline
+  const wh=median(wlines.map(l=>l.bbox.y1-l.bbox.y0));
+  const oh=median(body) || wh;
+  const ratio=wh/oh;
+  let status, detail;
+  if(ratio>=0.60){ status=MATCH;
+    detail=`Warning is consistent with the label's body text (\u2248${(ratio*100|0)}%) \u2014 not buried.`; }
+  else if(ratio>=0.40){ status=REVIEW;
+    detail=`Warning is smaller than the body text (\u2248${(ratio*100|0)}%) \u2014 check legibility.`; }
+  else { status=MISS;
+    detail=`Warning is much smaller than the body text (\u2248${(ratio*100|0)}%) \u2014 likely buried / too small.`; }
+  let detected=`\u2248${(ratio*100|0)}% of body text height`;
+  if(labelInches && imgPxHeight){
+    const {mm:minMm, basis}=minMmForVolume(netStr);
+    const mm=wh*((labelInches*25.4)/imgPxHeight);
+    const mmOk=mm>=minMm;
+    detected=`\u2248${mm.toFixed(1)} mm`;
+    status = mmOk ? (status===MISS?REVIEW:MATCH) : MISS;   // real measurement wins
+    detail=`Estimated \u2248${mm.toFixed(1)} mm vs ${minMm} mm minimum (${basis}). ${mmOk?"Meets minimum.":"Below minimum."} (Relative size \u2248${(ratio*100|0)}% of body text.)`;
+  }
+  return {name:"Warning text size", status, detected, expected:"legible, not buried", detail};
+}
+
+/* ---------- difficulty score (1 easy .. 10 hard) ----------
+   Reflects how confidently the tool read the label: clean high-confidence reads score low,
+   reviews/misses raise it. >=8 recommends a human look. */
+function difficultyScore(results){
+  let pen=0;
+  for(const r of results){
+    if(r.status===MISS) pen+=2.4;
+    else if(r.status===REVIEW) pen+=1.2;
+  }
+  return Math.min(10, Math.max(1, Math.round(1+pen)));
+}
+
+/* ---------- screen router ---------- */
+function show(id){
+  document.querySelectorAll(".screen").forEach(function(sc){ sc.hidden=(sc.id!==id); });
+  window.scrollTo(0,0);
+}
+document.addEventListener("click",function(e){ if(e.target.matches("[data-home]")) show("screen-home"); });
+
+/* ---------- results building (compact rows) ---------- */
+const BADGE={match:["Pass","b-match"],review:["Review","b-review"],miss:["Fail","b-miss"]};
+function worstOf(results){const o={miss:0,review:1,match:2};return results.reduce(function(w,r){return o[r.status]<o[w]?r.status:w;},"match");}
+function bannerHTML(results){
+  const w=worstOf(results), n=results.filter(function(r){return r.status!=="match" && r.status!=="info";}).length;
+  if(w==="match") return `<div class="banner ok"><span class="big">\u2713 SUCCESS</span><span class="sub">All checks passed.</span></div>`;
+  if(w==="review") return `<div class="banner rev"><span class="big">NEEDS REVIEW</span><span class="sub">${n} field(s) need a human look.</span></div>`;
+  return `<div class="banner bad"><span class="big">DEFECTS FOUND</span><span class="sub">${n} field(s) failed.</span></div>`;
+}
+function meterHTML(diff){
+  const note=diff<=3?"simple":diff<=7?"moderate":"difficult";
+  const rec=diff>=8?" \u00b7 recommend human review":"";
+  const dcls=diff>=8?"dhi":diff>=5?"dmid":"dlo";
+  return `<div class="diffrow"><div class="difflab">Label difficulty <b>${diff}/10</b><span class="diffnote">${note}${rec}</span></div><div class="diffbar"><i class="${dcls}" style="width:${diff*10}%"></i></div></div>`;
+}
+function tableHTML(results){
+  let h=`<table class="rt"><thead><tr><th>Field</th><th>Detected on label</th><th>Result</th></tr></thead><tbody>`;
+  for(const r of results){
+    const b=BADGE[r.status]||["",""];
+    const bt=r.badgeText||b[0], bc=r.badgeClass||b[1];
+    h+=`<tr><td class="rf">${escapeHtml(r.name)}</td><td class="rd">${escapeHtml(r.detected||"\u2014")}<div class="rdetail">${escapeHtml(r.detail||"")}</div></td><td class="rs"><span class="badge ${bc}">${bt}</span></td></tr>`;
+  }
+  return h+`</tbody></table>`;
+}
+// "View label / View application" buttons shown at the top of a result
+function viewBarHTML(imageURL, appURL){
+  let h='<div class="viewbar">';
+  if(imageURL) h+=`<button type="button" class="act ghost" onclick="window.open('${imageURL}','_blank')">View label</button>`;
+  if(appURL)   h+=`<button type="button" class="act ghost" onclick="window.open('${appURL}','_blank')">View application</button>`;
+  else         h+=`<span class="viewnote">No application paired (detection-only)</span>`;
+  return h+'</div>';
+}
+// email mockup as a self-wired node (safe to reuse many times in bulk) - nothing is actually sent
+function emailNode(defects, email){
+  const wrap=document.createElement("div"); wrap.className="emailwrap";
+  const to=email||"submitter@applicant.example";
+  const btn=document.createElement("button"); btn.type="button"; btn.className="act email"; btn.textContent="Notify applicant of issue(s)";
+  const box=document.createElement("div"); box.className="emailbox"; box.hidden=true;
+  btn.onclick=function(){
+    const fmt=function(d){
+      const exp=(d.expected && d.expected!=="\u2014") ? ` (application states: ${d.expected})` : "";
+      return `  \u2022 ${d.name} \u2014 ${d.detected}${exp}\n      ${d.detail}`;
+    };
+    const fails=defects.filter(function(d){return d.status==="miss";});
+    const revs =defects.filter(function(d){return d.status==="review";});
+    let issues="";
+    if(fails.length) issues+="MUST FIX (failed):\n"+fails.map(fmt).join("\n")+"\n\n";
+    if(revs.length)  issues+="NEEDS REVIEW:\n"+revs.map(fmt).join("\n")+"\n";
+    btn.hidden=true; box.hidden=false;
+    box.innerHTML=`<div class="efield"><b>To:</b> ${escapeHtml(to)}</div>`+
+      `<div class="efield"><b>Subject:</b> Action needed \u2014 label items on your COLA submission</div>`+
+      `<textarea class="ebody" rows="12">Dear Applicant,\n\nA review of your submitted label flagged the following item(s) to address before approval:\n\n${issues}\nPlease correct and resubmit. Reply with any questions.\n\n\u2014 TTB Label Compliance</textarea>`+
+      `<button type="button" class="act email send">Send notice</button>`;
+    box.querySelector(".send").onclick=function(){ box.innerHTML=`<div class="sent">\u2713 Applicant notified at ${escapeHtml(to)}</div>`; };
+  };
+  wrap.appendChild(btn); wrap.appendChild(box); return wrap;
+}
+function pageToolsHTML(){
+  return `<div class="pagetools"><button type="button" class="act ghost" onclick="window.print()">Print results</button></div>`;
+}
+function renderSingle(results, secs, imageURL, appURL){
+  const diff=difficultyScore(results);
+  const el=document.getElementById("singleBody");
+  el.innerHTML = pageToolsHTML()+bannerHTML(results)+viewBarHTML(imageURL, appURL)+meterHTML(diff)+`<div class="timing">Read in ${secs}s.</div>`+
+    `<details class="resultdrop" open><summary>Label &amp; detected details</summary>`+
+    `<div class="rcontent"><img class="rimg" src="${imageURL}" alt="label"/>${tableHTML(results)}</div></details>`;
+  const defects=results.filter(function(r){return r.status!=="match" && r.status!=="info";});
+  const appRow=results.find(function(r){return r.name==="Application";});
+  if(defects.length) el.querySelector(".rcontent").appendChild(emailNode(defects, appRow&&appRow.email));
+}
+function renderBulkResults(items){
+  const el=document.getElementById("bulkBody");
+  el.innerHTML=pageToolsHTML();
+  const isImport=function(it){ return it.results.some(function(r){return r.name==="U.S. importer";}); };
+  const passed=[], passedImports=[], failed=[];
+  for(const it of items){
+    if(worstOf(it.results)!=="match") failed.push(it);
+    else if(isImport(it)) passedImports.push(it);
+    else passed.push(it);
+  }
+  el.appendChild(bulkSection("Failed", failed, "sec-fail", true));
+  el.appendChild(bulkSection("Passed \u2014 Imports", passedImports, "sec-pass", false));
+  el.appendChild(bulkSection("Passed", passed, "sec-pass", false));
+}
+function bulkCard(it){
+  const w=worstOf(it.results), diff=difficultyScore(it.results);
+  const bc={match:"b-match",review:"b-review",miss:"b-miss"}[w], bt={match:"Pass",review:"Review",miss:"Fail"}[w];
+  const det=document.createElement("details"); det.className="filedrop";
+  det.innerHTML=`<summary><span class="fname" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</span><span class="ftag">${it.hadApp?"app paired":"detection only"}</span><span class="badge ${bc}">${bt}</span><span class="fdiff">${diff}/10</span></summary>`+
+    `<div class="rcontent">${viewBarHTML(it.imageURL, it.appURL)}${meterHTML(diff)}<img class="rimg" src="${it.imageURL}" alt="label"/>${tableHTML(it.results)}</div>`;
+  const defects=it.results.filter(function(r){return r.status!=="match" && r.status!=="info";});
+  const appRow=it.results.find(function(r){return r.name==="Application";});
+  if(defects.length) det.querySelector(".rcontent").appendChild(emailNode(defects, appRow&&appRow.email));
+  return det;
+}
+function bulkSection(title, items, cls, open){
+  const sec=document.createElement("details"); sec.className="bulksec "+cls; sec.open=!!open;
+  sec.innerHTML=`<summary class="bulkh">${title}<span class="cnt">${items.length}</span></summary>`;
+  if(!items.length){ const e=document.createElement("div"); e.className="bulkempty"; e.textContent="None."; sec.appendChild(e); return sec; }
+  for(const it of items) sec.appendChild(bulkCard(it));
+  return sec;
+}
+const escapeHtml=s=>(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+/* ---------- OCR engine (initialised once) ---------- */
+let worker=null, singleFile=null, bulkFiles=[], bulkItems=[], engineReady=false;
+function engineMsg(t){ ["engineS","engineB","engineD"].forEach(function(id){var e=document.getElementById(id); if(e) e.textContent=t;}); }
+async function initEngine(){
+  if(location.protocol==="file:"){
+    engineMsg("Open this through a local server (e.g. npx serve), not file:// \u2014 OCR can't start over file://.");
+    return;
+  }
+  engineMsg("Loading OCR engine (one time)\u2026");
+  try{
+    worker=await Tesseract.createWorker("eng+osd",1,{workerPath:"vendor/worker.min.js",corePath:"vendor",langPath:"vendor",gzip:false});
+    await worker.setParameters({ tessedit_pageseg_mode:"12" });
+    ["verifyBulk"].forEach(function(id){var b=document.getElementById(id); if(b){ b.disabled=false; b.textContent="Verify"; }});
+    engineReady=true; updateSingleBtn();
+    engineMsg("Ready.");
+  }catch(err){
+    engineMsg("OCR engine failed to load: "+err.message+" \u2014 check the vendor/ folder and that you're on a local server.");
+    console.error(err);
+  }
+}
+
+/* ---------- home wiring ---------- */
+const val=function(id){var e=document.getElementById(id);return e?e.value:"";};
+function manualCoreFilled(){ return ["brand","classtype","alcohol","net"].every(function(id){return (val(id)||"").trim()!=="";}); }
+function updateSingleBtn(){
+  var b=document.getElementById("verifySingle"); if(!b) return;
+  if(!engineReady){ b.disabled=true; b.textContent="Loading OCR engine\u2026"; return; }
+  if(appLoaded || manualCoreFilled()){ b.disabled=false; b.textContent="Verify"; }
+  else { b.disabled=true; b.textContent="Enter required details or load an application"; }
+}
+(function(){ var box=document.getElementById("manualBox"); if(box) box.addEventListener("input", updateSingleBtn); })();
+(function(){
+  const drop=document.getElementById("sDrop"), fi=document.getElementById("sFile"), chosen=document.getElementById("sChosen");
+  const set=function(f){ singleFile=f; chosen.textContent=f.name; chosen.classList.remove("empty"); drop.classList.add("has"); };
+  drop.addEventListener("click",function(){fi.click();});
+  drop.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();fi.click();}});
+  drop.addEventListener("dragover",function(e){e.preventDefault();drop.classList.add("has");});
+  drop.addEventListener("dragleave",function(){drop.classList.remove("has");});
+  drop.addEventListener("drop",function(e){e.preventDefault();if(e.dataTransfer.files[0])set(e.dataTransfer.files[0]);});
+  fi.addEventListener("change",function(e){if(e.target.files[0])set(e.target.files[0]);});
+})();
+(function(){
+  const drop=document.getElementById("bDrop"), fi=document.getElementById("bFile"), fo=document.getElementById("bFolder"), chosen=document.getElementById("bChosen");
+  function setBulk(items){
+    bulkItems=items.filter(function(it){
+      const n=it.path||it.file.name, t=it.file.type||"";
+      return /\.(png|jpe?g|webp|bmp|gif)$/i.test(n)||/^image\//.test(t)||/\.pdf$/i.test(n)||t==="application/pdf";
+    });
+    const labels=bulkItems.filter(function(it){const n=it.path||it.file.name;return /\.(png|jpe?g|webp|bmp|gif)$/i.test(n)||/^image\//.test(it.file.type||"");}).length;
+    const apps=bulkItems.length-labels;
+    chosen.textContent=bulkItems.length?`${labels} label(s), ${apps} application(s) selected.`:"Nothing usable selected.";
+    chosen.classList.toggle("empty",!bulkItems.length); drop.classList.toggle("has",!!bulkItems.length);
+  }
+  const fromList=function(list){ return [].slice.call(list).map(function(f){return {file:f, path:f.webkitRelativePath||f.name};}); };
+  function readEntry(entry, dir, out){
+    return new Promise(function(res){
+      if(!entry){res();return;}
+      if(entry.isFile){ entry.file(function(f){ out.push({file:f, path:(dir?dir+"/":"")+entry.name}); res(); }, function(){res();}); }
+      else if(entry.isDirectory){
+        const rdr=entry.createReader(), all=[];
+        const read=function(){ rdr.readEntries(function(ents){
+          if(!ents.length){ Promise.all(all.map(function(e){return readEntry(e,(dir?dir+"/":"")+entry.name,out);})).then(res); }
+          else { all.push.apply(all,ents); read(); }
+        }, function(){res();}); };
+        read();
+      } else res();
+    });
+  }
+  document.getElementById("bPickFiles").addEventListener("click",function(){fi.click();});
+  document.getElementById("bPickFolder").addEventListener("click",function(){ fo.setAttribute("webkitdirectory",""); fo.setAttribute("directory",""); fo.click(); });
+  drop.addEventListener("click",function(){fi.click();});
+  drop.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();fi.click();}});
+  drop.addEventListener("dragover",function(e){e.preventDefault();drop.classList.add("has");});
+  drop.addEventListener("dragleave",function(){drop.classList.remove("has");});
+  drop.addEventListener("drop",async function(e){
+    e.preventDefault();
+    const dt=e.dataTransfer, out=[];
+    const its=dt.items?[].slice.call(dt.items):[];
+    const entries=its.map(function(it){return it.webkitGetAsEntry?it.webkitGetAsEntry():null;}).filter(Boolean);
+    if(entries.length){ await Promise.all(entries.map(function(en){return readEntry(en,"",out);})); }
+    if(!out.length && dt.files.length){ for(const f of dt.files) out.push({file:f, path:f.name}); }
+    setBulk(out);
+  });
+  fi.addEventListener("change",function(e){ if(e.target.files.length) setBulk(fromList(e.target.files)); });
+  fo.addEventListener("change",function(e){ if(e.target.files.length) setBulk(fromList(e.target.files)); });
+})();
+// pair labels with applications: by subfolder (1 label + <=1 app), else by matching filename
+function groupBulk(items){
+  const byDir={}, base=function(n){return n.replace(/\.[^.]+$/,"").replace(/[_-]?application$/i,"").toLowerCase();};
+  for(const it of items){
+    const p=it.path||it.file.name, slash=p.lastIndexOf("/"), dir=slash>=0?p.slice(0,slash):"", name=slash>=0?p.slice(slash+1):p;
+    const isImg=/\.(png|jpe?g|webp|bmp|gif)$/i.test(name)||/^image\//.test(it.file.type||"");
+    const isPdf=/\.pdf$/i.test(name)||it.file.type==="application/pdf";
+    if(!isImg&&!isPdf) continue;
+    (byDir[dir]=byDir[dir]||{labels:[],apps:[]})[isImg?"labels":"apps"].push({file:it.file,name:name});
+  }
+  const pairs=[];
+  for(const dir in byDir){
+    const L=byDir[dir].labels, A=byDir[dir].apps;
+    if(L.length===1 && A.length<=1){ pairs.push({label:L[0].file, app:A[0]?A[0].file:null}); }
+    else { const m={}; for(const a of A) m[base(a.name)]=a.file; for(const l of L) pairs.push({label:l.file, app:m[base(l.name)]||null}); }
+  }
+  return pairs;
+}
+/* ---------- application PDF: parse + pre-fill ---------- */
+let appOrigin="", appLoaded=false, appEmail="", singleAppFile=null;
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc="vendor/pdf.worker.min.js";
+async function parseApplicationPDF(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const page=await pdf.getPage(1);
+  const clean=v=>{ v=(v==null?"":String(v)).trim(); return (v==="-"||v==="\u2014")?"":v; };
+  // 1) filled AcroForm fields (the blank fillable template) \u2014 read values by field name
+  let f={};
+  try{
+    const ann=await page.getAnnotations();
+    for(const a of ann){
+      if(a.fieldName && a.fieldValue!=null){
+        const v=String(a.fieldValue).trim();
+        if(v!=="" && v!=="Off") f[a.fieldName.trim()]=v;   // text values + checked radio/checkbox values
+      }
+    }
+  }catch(e){}
+  if(Object.keys(f).length){
+    const abv=clean(f["Alcohol Content"]), proof=clean(f["Proof"]);
+    // import status from the radio/checkbox, plus any country typed in the Origin text field
+    let origin=clean(f["Origin"]); const imp=(f["Imported"]||f["Import Status"]||"").trim().toLowerCase();
+    if(/^(y|yes|true|imported|import)/.test(imp)) origin=(origin && !/import|domestic/i.test(origin))?("Imported ("+origin+")"):"Imported";
+    else if(/^(n|no|false|domestic)/.test(imp)) origin="Domestic";
+    return { brand:clean(f["Brand Name"]), cls:clean(f["Class / Type"]),
+      alcohol:abv+(proof&&!/proof/i.test(abv)?` (${proof})`:""),
+      net:clean(f["Net Contents"]), origin:origin, email:clean(f["Contact Email"]||f["Email"]||"") };
+  }
+  // 2) text-layout PDFs (generated applications). A field's label and value share a baseline, but
+  // rendering can jitter that baseline by ~1px, so cluster items within a small tolerance rather
+  // than requiring an exact match (otherwise the value splits off its label and the field reads empty).
+  const tc=await page.getTextContent();
+  const items=tc.items.map(it=>({y:it.transform[5], x:it.transform[4], s:it.str})).sort((a,b)=>b.y-a.y);
+  const clusters=[];
+  for(const it of items){
+    const c=clusters[clusters.length-1];
+    if(c && Math.abs(it.y-c.y)<=3) c.items.push(it);
+    else clusters.push({y:it.y, items:[it]});
+  }
+  const text=clusters.map(c=>c.items.sort((a,b)=>a.x-b.x).map(o=>o.s).join(" ").replace(/\s+/g," ").trim()).join("\n");
+  const grab=re=>{ const m=text.match(re); return m?clean(m[1]):""; };
+  const abv=grab(/Alcohol Content[ \t]+([^\n]+)/i), proof=grab(/(?:^|\n)Proof[ \t]+([^\n]+)/i);
+  return { brand:grab(/Brand Name[ \t]+([^\n]+)/i), cls:grab(/Class\s*\/\s*Type[ \t]+([^\n]+)/i),
+    alcohol:abv+(proof&&!/proof/i.test(abv)?` (${proof})`:""),
+    net:grab(/Net Contents[ \t]+([^\n]+)/i), origin:grab(/Origin:?[ \t]+([^\n]+)/i),
+    email:grab(/Contact Email[ \t]+([^\n]+)/i) };
+}
+(function(){
+  const drop=document.getElementById("aDrop"), fi=document.getElementById("aFile"), chosen=document.getElementById("aChosen");
+  const setVal=(id,v)=>{ const e=document.getElementById(id); if(e&&v) e.value=v; };
+  const load=async f=>{
+    if(!window.pdfjsLib){ chosen.textContent="PDF reader not available."; return; }
+    chosen.textContent="Reading application\u2026"; chosen.classList.remove("empty");
+    try{
+      const a=await parseApplicationPDF(f);
+      setVal("brand",a.brand); setVal("classtype",a.cls); setVal("alcohol",a.alcohol); setVal("net",a.net);
+      const im=document.getElementById("imported"), og=document.getElementById("origin");
+      if(/^Imported/i.test(a.origin||"")){ if(im) im.value="yes"; const m=(a.origin||"").match(/\(([^)]+)\)/); if(og&&m) og.value=m[1]; }
+      else if(/^Domestic/i.test(a.origin||"")){ if(im) im.value="no"; }
+      appOrigin=a.origin||""; appLoaded=true; appEmail=a.email||""; singleAppFile=f; setVal("memail",a.email);
+      document.querySelector("details.manual2").open=true;
+      updateSingleBtn();
+      chosen.innerHTML=`Application loaded: <b>${a.brand||"(no brand)"}</b>`+(appOrigin?` \u00b7 ${appOrigin}`:"");
+      drop.classList.add("has");
+    }catch(err){ chosen.textContent="Could not read this PDF: "+err.message; console.error(err); }
+  };
+  drop.addEventListener("click",()=>fi.click());
+  drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fi.click();}});
+  drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("has");});
+  drop.addEventListener("dragleave",()=>drop.classList.remove("has"));
+  drop.addEventListener("drop",e=>{e.preventDefault();if(e.dataTransfer.files[0])load(e.dataTransfer.files[0]);});
+  fi.addEventListener("change",e=>{if(e.target.files[0])load(e.target.files[0]);});
+})();
+document.getElementById("verifySingle").addEventListener("click",verifySingle);
+document.getElementById("verifyBulk").addEventListener("click",verifyBulk);
+
+
+
+const KW=/government warning|surgeon general|birth defects|consumption of|operate machinery|health problems|drive a car/i;
+function loadImage(file){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file);});}
+const DIM=s=>({w:s.naturalWidth||s.width, h:s.naturalHeight||s.height});
+// C5: upscale small images + grayscale + mild contrast so OCR reads bold/textured fonts better
+function preprocess(img){
+  const {w:iw,h:ih}=DIM(img); const minW=1700;
+  const s=iw<minW?minW/iw:1; const w=Math.round(iw*s),h=Math.round(ih*s);
+  const c=document.createElement("canvas");c.width=w;c.height=h;
+  const x=c.getContext("2d");x.imageSmoothingQuality="high";x.drawImage(img,0,0,w,h);
+  const id=x.getImageData(0,0,w,h),d=id.data;
+  for(let i=0;i<d.length;i+=4){
+    let g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    g=(g-128)*1.2+128; g=g<0?0:g>255?255:g; d[i]=d[i+1]=d[i+2]=g;
+  }
+  x.putImageData(id,0,0); return c;
+}
+/* rotate a canvas by 90/270 — used for the one extra pass that reads a vertical/side-column warning */
+function rotateCanvas(src, deg){
+  const swap=(deg===90||deg===270);
+  const c=document.createElement("canvas");
+  c.width = swap?src.height:src.width; c.height = swap?src.width:src.height;
+  const x=c.getContext("2d");
+  x.translate(c.width/2,c.height/2); x.rotate(deg*Math.PI/180);
+  x.drawImage(src,-src.width/2,-src.height/2);
+  return c;
+}
+
+
+
+// Run the full OCR + checks pipeline on one file. exp = optional expected values.
+async function runChecks(file, exp, onStatus){
+  exp=exp||{};
+  const img=await loadImage(file);
+  const base=preprocess(img);                 // C5: upscaled grayscale
+  const imgPxH=base.height||0;
+  const labelIn=parseFloat(exp.labelh)||0;
+  const r0=await worker.recognize(base,{},{blocks:true});
+  const ocr0=r0.data.text||""; const lines0=flattenLines(r0.data);
+  // Field reads (brand/class/alcohol/net) come from the upright pass. If the government warning
+  // wasn't confidently found upright, rotate the label ONCE (90°) and re-OCR — this recovers a
+  // warning printed vertically up the side of the bottle. The rotation feeds the warning checks only,
+  // so it can never disturb the upright field reads.
+  let warnText=ocr0, warnAllLines=lines0, rotated=false;
+  if(onStatus) onStatus("Reading label\u2026");
+  if(warnCoverage(ocr0).cov < 0.6){
+    if(onStatus) onStatus("Checking a rotated orientation for a side/vertical warning\u2026");
+    const r1=await worker.recognize(rotateCanvas(base,90),{},{blocks:true});
+    const t1=r1.data.text||"";
+    if(warnCoverage(t1).cov > warnCoverage(ocr0).cov){
+      warnText = ocr0+"\n"+t1; warnAllLines = lines0.concat(flattenLines(r1.data)); rotated=true;
+    }
+  }
+  const warnLines=warnAllLines.filter(l=>KW.test(l.text));
+  // Net contents lives in a structured stat band (e.g. "11.5% | 750 ML | SEMI-DRY"). PSM 12 (sparse)
+  // reads scattered warning words well but often fragments that band, dropping the volume. If no
+  // volume is found upright, retry ONCE at PSM 4 (single column) — far better at structured rows —
+  // and feed that to the net-contents check only.
+  let netText=ocr0;
+  if(!detectVolume(ocr0)){
+    if(onStatus) onStatus("Re-reading the net-contents band\u2026");
+    await worker.setParameters({ tessedit_pageseg_mode:"4" });
+    const rN=await worker.recognize(base,{},{blocks:true});
+    await worker.setParameters({ tessedit_pageseg_mode:"12" });
+    netText = ocr0+"\n"+(rN.data.text||"");
+  }
+  const results=[
+    checkBrandField(lines0, exp.brand||""),
+    checkClassField(lines0, exp.classtype||""),
+    checkAlcoholField(ocr0, exp.alcohol||""),
+    checkNetField(netText, exp.net||""),
+    checkWarning(warnText),
+    checkWarningWording(warnText),
+    checkWarningSize(warnLines, imgPxH, labelIn, exp.net||"")
+  ];
+  const importRow = checkImport(ocr0, exp.origin||"");
+  if(importRow) results.push(importRow);
+  results.unshift({ name:"Application",
+    detected: exp.appFound ? ("Paired"+(exp.email?" \u00b7 "+exp.email:"")) : "None \u2014 detection-only read",
+    expected:"\u2014", status:"info", detail: exp.appFound ? ("Fields below were verified against the application."+(exp.email?" Applicant contact: "+exp.email:"")) : "No application provided; fields read from the label only.",
+    badgeText: exp.appFound ? "Found" : "None", badgeClass:"b-info", email: exp.email||"" });
+  return {results, warnText:warnText, rotated:rotated};
+}
+
+/* ---------- loading + run ---------- */
+let _tick=null,_t0=0;
+function startLoading(msg){
+  show("screen-loading");
+  document.getElementById("loadMsg").textContent=msg||"Reading\u2026";
+  const tm=document.getElementById("loadTimer"); tm.textContent="0.0s";
+  _t0=performance.now();
+  _tick=setInterval(function(){ tm.textContent=((performance.now()-_t0)/1000).toFixed(1)+"s"; },100);
+}
+function stopLoading(){ if(_tick){clearInterval(_tick);_tick=null;} return ((performance.now()-_t0)/1000).toFixed(1); }
+
+async function verifySingle(){
+  if(!singleFile){ engineMsg("Choose a label image first."); document.getElementById("optSingle").open=true; return; }
+  if(!worker){ engineMsg("Engine still loading \u2014 try again in a moment."); return; }
+  startLoading("Reading label\u2026");
+  try{
+    const alc=val("alcohol"), pf=val("proof");
+    const alcohol = alc + (pf && !/proof/i.test(alc) ? ` (${pf})` : "");
+    let origin=appOrigin;
+    if(!appLoaded){
+      const imp=val("imported"), oc=(val("origin")||"").trim();
+      origin = imp==="yes" ? (oc?("Imported ("+oc+")"):"Imported") : "Domestic";
+    }
+    const exp={brand:val("brand"),classtype:val("classtype"),alcohol:alcohol,net:val("net"),labelh:val("labelh"),origin:origin,appFound:appLoaded,email:appLoaded?appEmail:(val("memail")||"")};
+    const out=await runChecks(singleFile, exp);
+    const secs=stopLoading();
+    renderSingle(out.results, secs, URL.createObjectURL(singleFile), (appLoaded&&singleAppFile)?URL.createObjectURL(singleAppFile):null);
+    show("screen-single");
+  }catch(err){ stopLoading(); show("screen-home"); engineMsg("Could not read the image: "+err.message); }
+}
+
+async function verifyBulk(){
+  if(!bulkItems.length){ engineMsg("Choose labels (and applications) first."); document.getElementById("optBulk").open=true; return; }
+  if(!worker){ engineMsg("Engine still loading \u2014 try again in a moment."); return; }
+  const pairs=groupBulk(bulkItems).filter(function(p){return p.label;}).slice(0,100);
+  if(!pairs.length){ engineMsg("No label images found in that selection."); return; }
+  startLoading("Reading labels\u2026");
+  const items=[];
+  for(let i=0;i<pairs.length;i++){
+    document.getElementById("loadMsg").textContent=`Reading label ${i+1} of ${pairs.length}\u2026`;
+    let exp={}, hadApp=false;
+    if(pairs[i].app && window.pdfjsLib){
+      try{ const a=await parseApplicationPDF(pairs[i].app); exp={brand:a.brand,classtype:a.cls,alcohol:a.alcohol,net:a.net,origin:a.origin,email:a.email}; hadApp=true; }
+      catch(e){ hadApp=false; }
+    }
+    try{ const out=await runChecks(pairs[i].label, (exp.appFound=hadApp, exp));
+      items.push({name:pairs[i].label.name, results:out.results, imageURL:URL.createObjectURL(pairs[i].label), appURL:pairs[i].app?URL.createObjectURL(pairs[i].app):null, hadApp:hadApp}); }
+    catch(err){ items.push({name:pairs[i].label.name, results:[row("Read error","(could not read)","\u2014","miss","OCR failed on this image.")], imageURL:URL.createObjectURL(pairs[i].label), appURL:pairs[i].app?URL.createObjectURL(pairs[i].app):null, hadApp:hadApp}); }
+  }
+  stopLoading();
+  renderBulkResults(items);
+  show("screen-bulk");
+}
+
+initEngine();
+</script>
+</body>
+</html>
